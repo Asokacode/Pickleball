@@ -34,11 +34,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-<!-- ================= html2pdf.js (untuk fitur Download PDF) ================= -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<!-- ================= jsPDF (untuk fitur Download PDF) =================
+     Dipakai langsung (bukan lewat screenshot HTML) supaya hasil PDF
+     selalu berhasil dibuat di semua perangkat/browser, termasuk saat
+     dijalankan lewat GitHub Pages di HP. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <!-- ================= FIREBASE (compat SDK) ================= -->
-<!-- Gunakan versi compat agar mudah dipakai langsung dengan <script> tanpa build tool -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
@@ -218,6 +220,7 @@
 
     <p class="text-center text-xs text-court-line/50">
       Sistem reli &bull; menang selisih 2 poin &bull; target <span id="targetLabel">21</span> poin
+      <br>Servis otomatis pindah tim saat tim yang menerima memenangkan reli (side-out langsung)
     </p>
 
     <!-- ============================================================ -->
@@ -273,46 +276,24 @@
   </footer>
 </div>
 
-<!-- ============================================================ -->
-<!-- TEMPLATE TERSEMBUNYI UNTUK PDF (dirender off-screen, bukan display:none, -->
-<!-- agar html2canvas tetap bisa menangkapnya) -->
-<!-- ============================================================ -->
-<div id="pdfTemplate" style="position:fixed; left:-9999px; top:0; width:600px; background:#ffffff; color:#111827; font-family:'Inter',sans-serif; padding:32px;">
-  <h1 style="font-family:'Outfit',sans-serif; font-size:22px; font-weight:800; margin:0 0 4px;">🏓 Rekap Pertandingan Pickleball</h1>
-  <p id="pdfDate" style="font-size:12px; color:#6b7280; margin:0 0 20px;"></p>
-
-  <table style="width:100%; border-collapse:collapse; margin-bottom:16px;">
-    <tr>
-      <td style="width:50%; padding:16px; border:2px solid #FF6B4A; border-radius:8px; text-align:center;">
-        <p style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#FF6B4A; font-weight:700; margin:0 0 4px;">Tim 1</p>
-        <p id="pdfTeam1" style="font-weight:600; margin:0 0 10px; font-size:13px;"></p>
-        <p id="pdfScore1" style="font-family:'Outfit',sans-serif; font-size:48px; font-weight:900; margin:0;"></p>
-      </td>
-      <td style="width:6%;"></td>
-      <td style="width:50%; padding:16px; border:2px solid #3AA6FF; border-radius:8px; text-align:center;">
-        <p style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#3AA6FF; font-weight:700; margin:0 0 4px;">Tim 2</p>
-        <p id="pdfTeam2" style="font-weight:600; margin:0 0 10px; font-size:13px;"></p>
-        <p id="pdfScore2" style="font-family:'Outfit',sans-serif; font-size:48px; font-weight:900; margin:0;"></p>
-      </td>
-    </tr>
-  </table>
-
-  <p id="pdfWinner" style="text-align:center; font-weight:700; font-size:15px; background:#D7F238; padding:10px; border-radius:8px; margin:0 0 8px;"></p>
-  <p style="text-align:center; font-size:11px; color:#9ca3af; margin:0;">Dibuat otomatis oleh Skor Pickleball App</p>
-</div>
-
-
 <script>
 /* =====================================================================
    STATE PERTANDINGAN
+   =====================================================================
+   Sistem servis disederhanakan (side-out otomatis):
+   - Tim yang sedang servis dan memenangkan reli -> +1 poin, tetap servis.
+   - Tim yang menerima dan memenangkan reli -> +1 poin, servis LANGSUNG
+     berpindah ke tim tersebut (tanpa server-1/server-2 per tim).
+   - server1Index / server2Index dipakai hanya untuk menampilkan nama
+     pemain mana yang "maju" servis, bergantian tiap kali tim itu
+     mendapat giliran servis lagi.
    ===================================================================== */
 let state = {
   score1: 0,
   score2: 0,
-  serverTeam: 1,        // tim yang sedang servis: 1 atau 2
-  serverPlayerIndex: 0, // index pemain dalam tim yang servis (0/1)
-  serverNumber: 1,      // server ke-1 atau ke-2 dalam tim tsb
-  firstServeOfGame: true, // aturan khusus: servis pertama game hanya 1 kesempatan
+  serverTeam: 1,     // tim yang sedang servis: 1 atau 2
+  server1Index: 0,   // pemain tim 1 yang sedang giliran servis (0/1)
+  server2Index: 0,   // pemain tim 2 yang sedang giliran servis (0/1)
   gameOver: false,
   winner: null
 };
@@ -339,13 +320,13 @@ function targetScore(){
 }
 
 /* =====================================================================
-   LOGIKA POIN & ROTASI SERVIS (ganda pickleball, sistem reli)
+   LOGIKA POIN & SERVIS (side-out otomatis, sederhana)
    ===================================================================== */
 function pointChange(team, delta){
   if(state.gameOver && delta > 0) return;
 
   if(delta < 0){
-    // Kurangi skor saja (tanpa membatalkan rotasi servis - untuk koreksi cepat)
+    // Kurangi skor saja (untuk koreksi cepat), servis tidak diubah
     if(team === 1) state.score1 = Math.max(0, state.score1 - 1);
     else state.score2 = Math.max(0, state.score2 - 1);
     state.gameOver = false;
@@ -357,32 +338,14 @@ function pointChange(team, delta){
   // delta > 0 -> tim ini memenangkan reli
   if(team === 1) state.score1++; else state.score2++;
 
-  const isServingTeamScoring = (team === state.serverTeam);
-
-  if(isServingTeamScoring){
-    // Server yang sama melanjutkan servis (pindah sisi kanan/kiri secara nyata,
-    // tapi identitas server tidak berubah)
-  } else {
-    // Tim penerima memenangkan reli -> proses aturan side-out
-    if(state.serverNumber === 1){
-      if(state.firstServeOfGame){
-        // Servis pertama game: hanya 1 kesempatan servis lalu langsung pindah tim
-        state.serverTeam = team;
-        state.serverPlayerIndex = 0;
-        state.serverNumber = 1;
-        state.firstServeOfGame = false;
-      } else {
-        // Pindah ke server ke-2 (partner), tim servis tetap sama
-        state.serverNumber = 2;
-        state.serverPlayerIndex = 1 - state.serverPlayerIndex;
-      }
-    } else {
-      // Server ke-2 gagal -> side-out, servis pindah ke tim lawan
-      state.serverTeam = team;
-      state.serverPlayerIndex = 0;
-      state.serverNumber = 1;
-    }
+  if(team !== state.serverTeam){
+    // Tim penerima menang reli -> servis langsung pindah ke tim ini
+    if(team === 1) state.server1Index = 1 - state.server1Index;
+    else state.server2Index = 1 - state.server2Index;
+    state.serverTeam = team;
   }
+  // Jika tim yang sedang servis yang menang reli -> servis tetap sama,
+  // tidak ada perubahan apa pun selain skor.
 
   checkWinner();
   render();
@@ -409,18 +372,16 @@ function render(){
   el('targetLabel').textContent = targetScore();
 
   // Badge servis
+  const servingIndex = state.serverTeam === 1 ? state.server1Index : state.server2Index;
   const players = getPlayers(state.serverTeam);
-  const serverName = players[state.serverPlayerIndex];
-  const serveDesc = state.firstServeOfGame
-    ? 'Servis Pertama Game'
-    : `Server ${state.serverNumber}`;
+  const serverName = players[servingIndex];
 
   el('serveBadge1').classList.toggle('flex', state.serverTeam === 1);
   el('serveBadge1').classList.toggle('hidden', state.serverTeam !== 1);
   el('serveBadge2').classList.toggle('flex', state.serverTeam === 2);
   el('serveBadge2').classList.toggle('hidden', state.serverTeam !== 2);
-  el('serveText1').textContent = `${serverName} • ${serveDesc}`;
-  el('serveText2').textContent = `${serverName} • ${serveDesc}`;
+  el('serveText1').textContent = `${serverName} sedang melayani`;
+  el('serveText2').textContent = `${serverName} sedang melayani`;
 
   // Highlight kartu tim yang servis
   el('card1').classList.toggle('serving-glow', state.serverTeam === 1);
@@ -462,9 +423,8 @@ function resetMatch(){
   state = {
     score1: 0, score2: 0,
     serverTeam: firstTeam,
-    serverPlayerIndex: 0,
-    serverNumber: 1,
-    firstServeOfGame: true,
+    server1Index: 0,
+    server2Index: 0,
     gameOver: false,
     winner: null
   };
@@ -477,35 +437,85 @@ function closeOverlayAndReset(){
 }
 
 /* =====================================================================
-   DOWNLOAD PDF (html2pdf.js)
+   DOWNLOAD PDF (jsPDF langsung, tanpa screenshot DOM)
    ===================================================================== */
 function downloadPDF(){
+  if(!window.jspdf || !window.jspdf.jsPDF){
+    alert('Gagal memuat pustaka PDF. Pastikan perangkat kamu terhubung ke internet, lalu coba lagi.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a5', orientation: 'portrait' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 36;
+
   const now = new Date();
   const dateStr = now.toLocaleDateString('id-ID', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
     + ' • ' + now.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
 
-  el('pdfDate').textContent = dateStr;
-  el('pdfTeam1').textContent = teamLabel(1);
-  el('pdfTeam2').textContent = teamLabel(2);
-  el('pdfScore1').textContent = state.score1;
-  el('pdfScore2').textContent = state.score2;
+  // Judul
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.setTextColor(20, 20, 20);
+  doc.text('Rekap Pertandingan Pickleball', pageWidth / 2, 50, { align: 'center' });
 
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.setTextColor(110, 110, 110);
+  doc.text(dateStr, pageWidth / 2, 68, { align: 'center' });
+
+  // Kotak Tim
+  const boxY = 92;
+  const boxH = 130;
+  const gap = 16;
+  const boxW = (pageWidth - margin * 2 - gap) / 2;
+  const box1X = margin;
+  const box2X = margin + boxW + gap;
+
+  function drawTeamBox(x, label, teamName, score, r, g, b){
+    doc.setDrawColor(r, g, b);
+    doc.setLineWidth(1.5);
+    doc.roundedRect(x, boxY, boxW, boxH, 8, 8);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(r, g, b);
+    doc.text(label, x + boxW / 2, boxY + 22, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(40, 40, 40);
+    const nameLines = doc.splitTextToSize(teamName, boxW - 16);
+    doc.text(nameLines, x + boxW / 2, boxY + 40, { align: 'center' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(42);
+    doc.setTextColor(20, 20, 20);
+    doc.text(String(score), x + boxW / 2, boxY + 105, { align: 'center' });
+  }
+
+  drawTeamBox(box1X, 'TIM 1', teamLabel(1), state.score1, 255, 107, 74);
+  drawTeamBox(box2X, 'TIM 2', teamLabel(2), state.score2, 58, 166, 255);
+
+  // Pita pemenang
   let winnerLine = 'Pertandingan masih berlangsung saat rekap dibuat.';
   if(state.gameOver){
-    const winName = state.winner === 1 ? teamLabel(1) : teamLabel(2);
-    winnerLine = `🏆 Pemenang: ${winName}`;
+    winnerLine = 'Pemenang: ' + (state.winner === 1 ? teamLabel(1) : teamLabel(2));
   }
-  el('pdfWinner').textContent = winnerLine;
+  const bannerY = boxY + boxH + 24;
+  doc.setFillColor(215, 242, 56);
+  doc.roundedRect(margin, bannerY, pageWidth - margin * 2, 34, 6, 6, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(20, 20, 20);
+  doc.text(winnerLine, pageWidth / 2, bannerY + 22, { align: 'center' });
 
-  const opt = {
-    margin: 0,
-    filename: `rekap-pickleball-${now.toISOString().slice(0,10)}.pdf`,
-    image: { type:'jpeg', quality:0.98 },
-    html2canvas: { scale:2, backgroundColor:'#ffffff' },
-    jsPDF: { unit:'pt', format:'a5', orientation:'portrait' }
-  };
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(160, 160, 160);
+  doc.text('Dibuat otomatis oleh Skor Pickleball App', pageWidth / 2, bannerY + 60, { align: 'center' });
 
-  html2pdf().set(opt).from(el('pdfTemplate')).save();
+  doc.save(`rekap-pickleball-${now.toISOString().slice(0, 10)}.pdf`);
 }
 
 /* =====================================================================
@@ -513,10 +523,9 @@ function downloadPDF(){
    =====================================================================
    PENTING: Ganti konfigurasi di bawah ini dengan konfigurasi proyek
    Firebase Anda sendiri (Firebase Console > Project Settings > Your apps).
-   Pastikan juga Firestore sudah diaktifkan (mode production/test) dan
-   security rules mengizinkan akses yang sesuai kebutuhan Anda.
+   Pastikan Firestore sudah diaktifkan dan security rules sesuai kebutuhan.
    ===================================================================== */
-const firebaseConfig = {
+  const firebaseConfig = {
     apiKey: "AIzaSyCqLRK7iIozFfF-xys8myrMT2O_7nndtSk",
     authDomain: "scoreboard-c22213.firebaseapp.com",
     projectId: "scoreboard-c22213",
@@ -527,12 +536,10 @@ const firebaseConfig = {
   };
 
 let db = null;
-let firebaseReady = false;
 
 try {
   firebase.initializeApp(firebaseConfig);
   db = firebase.firestore();
-  firebaseReady = true;
 } catch(err){
   console.warn('Firebase belum dikonfigurasi dengan benar:', err);
 }
