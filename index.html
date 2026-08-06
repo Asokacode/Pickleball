@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Skor Pickleball Ganda</title>
+
+<!-- ================= TAILWIND CSS (CDN) ================= -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['Outfit', 'sans-serif'],
+          body: ['Inter', 'sans-serif'],
+        },
+        colors: {
+          court: {
+            DEFAULT: '#0E3B43',
+            deep: '#0A2A30',
+            line: '#EAFBE0',
+          },
+          ball: '#D7F238',
+          team1: '#FF6B4A',
+          team2: '#3AA6FF',
+        }
+      }
+    }
+  }
+</script>
+
+<!-- ================= GOOGLE FONTS ================= -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- ================= html2pdf.js (untuk fitur Download PDF) ================= -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+<!-- ================= FIREBASE (compat SDK) ================= -->
+<!-- Gunakan versi compat agar mudah dipakai langsung dengan <script> tanpa build tool -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+  body{ font-family:'Inter', sans-serif; }
+  .font-display{ font-family:'Outfit', sans-serif; }
+  .tabular{ font-variant-numeric: tabular-nums; }
+
+  /* Garis putus-putus ala garis lapangan pickleball */
+  .court-dashed{
+    background-image: repeating-linear-gradient(to bottom, rgba(234,251,224,0.35) 0 10px, transparent 10px 20px);
+    width: 2px;
+  }
+
+  /* Animasi bola berpindah ke sisi yang sedang servis */
+  .ball-dot{
+    transition: left .45s cubic-bezier(.34,1.56,.64,1), background-color .3s ease;
+  }
+
+  /* Highlight tim yang sedang servis */
+  .serving-glow{
+    box-shadow: 0 0 0 2px rgba(215,242,56,0.9), 0 0 30px -4px rgba(215,242,56,0.45);
+  }
+
+  .btn-score{
+    -webkit-tap-highlight-color: transparent;
+    user-select:none;
+  }
+  .btn-score:active{ transform: scale(0.92); }
+
+  ::selection{ background:#D7F238; color:#0A2A30; }
+
+  @media (prefers-reduced-motion: reduce){
+    .ball-dot{ transition:none; }
+  }
+</style>
+</head>
+
+<body class="bg-court text-court-line min-h-screen">
+<div class="min-h-screen bg-gradient-to-b from-court-deep via-court to-court-deep">
+
+  <!-- ============================================================ -->
+  <!-- HEADER -->
+  <!-- ============================================================ -->
+  <header class="max-w-3xl mx-auto px-4 pt-8 pb-4 text-center">
+    <p class="uppercase tracking-[0.25em] text-ball/80 text-xs font-semibold font-display">Ganda &bull; Rally Scoring</p>
+    <h1 class="font-display font-black text-3xl sm:text-4xl mt-1 flex items-center justify-center gap-2">
+      <span>🏓</span> Skor Pickleball
+    </h1>
+    <p class="text-court-line/60 text-sm mt-1">Papan skor interaktif untuk pertandingan ganda</p>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-3 sm:px-4 pb-24 space-y-5">
+
+    <!-- ============================================================ -->
+    <!-- SETUP PEMAIN -->
+    <!-- ============================================================ -->
+    <section class="bg-white/5 backdrop-blur rounded-2xl border border-white/10 p-4 sm:p-5">
+      <div class="flex items-center justify-between mb-3 cursor-pointer" onclick="toggleSetup()">
+        <h2 class="font-display font-bold text-lg flex items-center gap-2">
+          <span class="text-ball">01</span> Nama Pemain
+        </h2>
+        <button id="setupToggleBtn" class="text-xs text-court-line/60 underline">Sembunyikan</button>
+      </div>
+
+      <div id="setupBody" class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <!-- TIM 1 -->
+          <div class="border-l-4 border-team1 pl-3 space-y-2">
+            <p class="text-xs font-semibold uppercase tracking-wide text-team1">Tim 1</p>
+            <input id="p1a" type="text" placeholder="Player A" maxlength="16"
+              class="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-sm placeholder-court-line/40 focus:outline-none focus:ring-2 focus:ring-team1"
+              oninput="render()">
+            <input id="p1b" type="text" placeholder="Player B" maxlength="16"
+              class="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-sm placeholder-court-line/40 focus:outline-none focus:ring-2 focus:ring-team1"
+              oninput="render()">
+          </div>
+          <!-- TIM 2 -->
+          <div class="border-l-4 border-team2 pl-3 space-y-2">
+            <p class="text-xs font-semibold uppercase tracking-wide text-team2">Tim 2</p>
+            <input id="p2a" type="text" placeholder="Player C" maxlength="16"
+              class="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-sm placeholder-court-line/40 focus:outline-none focus:ring-2 focus:ring-team2"
+              oninput="render()">
+            <input id="p2b" type="text" placeholder="Player D" maxlength="16"
+              class="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-sm placeholder-court-line/40 focus:outline-none focus:ring-2 focus:ring-team2"
+              oninput="render()">
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-4 pt-1 text-sm">
+          <div class="flex items-center gap-2">
+            <label class="text-court-line/70">Target Poin:</label>
+            <select id="targetScore" class="bg-white/10 border border-white/10 rounded-lg px-2 py-1 text-sm focus:outline-none">
+              <option value="11">11</option>
+              <option value="15">15</option>
+              <option value="21" selected>21</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-court-line/70">Servis Pertama:</label>
+            <select id="firstServeTeam" class="bg-white/10 border border-white/10 rounded-lg px-2 py-1 text-sm focus:outline-none">
+              <option value="1">Tim 1</option>
+              <option value="2">Tim 2</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- PAPAN SKOR -->
+    <!-- ============================================================ -->
+    <section class="relative">
+      <div class="grid grid-cols-2 gap-2 sm:gap-4">
+
+        <!-- TIM 1 CARD -->
+        <div id="card1" class="relative rounded-2xl p-3 sm:p-5 bg-white/5 border border-team1/30 transition-shadow">
+          <div class="text-center">
+            <p class="text-[11px] sm:text-xs uppercase tracking-wide font-semibold text-team1 font-display">Tim 1</p>
+            <p id="teamName1" class="text-xs sm:text-sm text-court-line/80 truncate font-medium mt-0.5">Player A &amp; Player B</p>
+          </div>
+
+          <div class="text-center my-3 sm:my-4">
+            <span id="score1" class="font-display font-black tabular text-7xl sm:text-8xl md:text-9xl leading-none text-court-line">0</span>
+          </div>
+
+          <div id="serveBadge1" class="hidden justify-center mb-3">
+            <span class="inline-flex items-center gap-1 bg-ball/90 text-court-deep text-[11px] sm:text-xs font-bold px-3 py-1 rounded-full">
+              🎾 <span id="serveText1">Melayani</span>
+            </span>
+          </div>
+
+          <div class="flex items-center justify-center gap-3">
+            <button onclick="pointChange(1,-1)"
+              class="btn-score w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/10 border border-white/20 text-2xl font-bold active:bg-white/20">&minus;</button>
+            <button onclick="pointChange(1,1)"
+              class="btn-score w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-team1 text-court-deep text-3xl font-black shadow-lg shadow-team1/30 active:brightness-90">+</button>
+          </div>
+        </div>
+
+        <!-- TIM 2 CARD -->
+        <div id="card2" class="relative rounded-2xl p-3 sm:p-5 bg-white/5 border border-team2/30 transition-shadow">
+          <div class="text-center">
+            <p class="text-[11px] sm:text-xs uppercase tracking-wide font-semibold text-team2 font-display">Tim 2</p>
+            <p id="teamName2" class="text-xs sm:text-sm text-court-line/80 truncate font-medium mt-0.5">Player C &amp; Player D</p>
+          </div>
+
+          <div class="text-center my-3 sm:my-4">
+            <span id="score2" class="font-display font-black tabular text-7xl sm:text-8xl md:text-9xl leading-none text-court-line">0</span>
+          </div>
+
+          <div id="serveBadge2" class="hidden justify-center mb-3">
+            <span class="inline-flex items-center gap-1 bg-ball/90 text-court-deep text-[11px] sm:text-xs font-bold px-3 py-1 rounded-full">
+              🎾 <span id="serveText2">Melayani</span>
+            </span>
+          </div>
+
+          <div class="flex items-center justify-center gap-3">
+            <button onclick="pointChange(2,-1)"
+              class="btn-score w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/10 border border-white/20 text-2xl font-bold active:bg-white/20">&minus;</button>
+            <button onclick="pointChange(2,1)"
+              class="btn-score w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-team2 text-court-deep text-3xl font-black shadow-lg shadow-team2/30 active:brightness-90">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- garis net di tengah (hanya md+) + bola indikator servis -->
+      <div class="hidden sm:block absolute top-4 bottom-4 left-1/2 -translate-x-1/2 pointer-events-none">
+        <div class="court-dashed h-full mx-auto"></div>
+      </div>
+      <div id="ballIndicatorWrap" class="hidden sm:flex absolute -top-2 left-0 right-0 justify-center pointer-events-none">
+        <div class="relative w-full h-0">
+          <div id="ballDot" class="ball-dot absolute -top-1 w-4 h-4 rounded-full bg-ball border-2 border-court-deep" style="left:25%;"></div>
+        </div>
+      </div>
+    </section>
+
+    <p class="text-center text-xs text-court-line/50">
+      Sistem reli &bull; menang selisih 2 poin &bull; target <span id="targetLabel">21</span> poin
+    </p>
+
+    <!-- ============================================================ -->
+    <!-- KONTROL -->
+    <!-- ============================================================ -->
+    <section class="grid grid-cols-2 gap-3">
+      <button onclick="resetMatch()"
+        class="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 border border-white/15 rounded-xl py-3 text-sm font-semibold">
+        🔄 Reset
+      </button>
+      <button onclick="downloadPDF()"
+        class="flex items-center justify-center gap-2 bg-ball text-court-deep hover:brightness-95 rounded-xl py-3 text-sm font-bold">
+        ⬇️ Download PDF
+      </button>
+      <button onclick="saveMatchToCloud()"
+        class="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 border border-white/15 rounded-xl py-3 text-sm font-semibold col-span-2 sm:col-span-1">
+        ☁️ Simpan ke Cloud
+      </button>
+      <button onclick="toggleHistory()"
+        class="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 border border-white/15 rounded-xl py-3 text-sm font-semibold col-span-2 sm:col-span-1">
+        📜 Riwayat Pertandingan
+      </button>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- RIWAYAT (FIREBASE) -->
+    <!-- ============================================================ -->
+    <section id="historyPanel" class="hidden bg-white/5 backdrop-blur rounded-2xl border border-white/10 p-4 sm:p-5">
+      <h2 class="font-display font-bold text-lg mb-2 flex items-center gap-2"><span class="text-ball">02</span> Riwayat Pertandingan</h2>
+      <p id="historyStatus" class="text-xs text-court-line/50 mb-2">Menghubungkan ke Firebase...</p>
+      <div id="historyList" class="space-y-2 text-sm"></div>
+    </section>
+
+  </main>
+
+  <!-- ============================================================ -->
+  <!-- OVERLAY PEMENANG -->
+  <!-- ============================================================ -->
+  <div id="winnerOverlay" class="hidden fixed inset-0 bg-court-deep/90 backdrop-blur-sm z-40 flex items-center justify-center px-6">
+    <div class="bg-court border border-ball/40 rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl">
+      <p class="text-5xl mb-2">🏆</p>
+      <p class="font-display font-black text-2xl text-ball mb-1">Pertandingan Selesai!</p>
+      <p id="winnerText" class="text-court-line/90 mb-6"></p>
+      <div class="flex flex-col gap-2">
+        <button onclick="downloadPDF()" class="bg-ball text-court-deep font-bold rounded-xl py-3">⬇️ Download PDF</button>
+        <button onclick="closeOverlayAndReset()" class="bg-white/10 border border-white/15 rounded-xl py-3 font-semibold">Main Lagi</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="text-center text-[11px] text-court-line/40 pb-6">
+    Dibuat untuk dijalankan di GitHub Pages &mdash; 100% statis, tanpa server.
+  </footer>
+</div>
+
+<!-- ============================================================ -->
+<!-- TEMPLATE TERSEMBUNYI UNTUK PDF (dirender off-screen, bukan display:none, -->
+<!-- agar html2canvas tetap bisa menangkapnya) -->
+<!-- ============================================================ -->
+<div id="pdfTemplate" style="position:fixed; left:-9999px; top:0; width:600px; background:#ffffff; color:#111827; font-family:'Inter',sans-serif; padding:32px;">
+  <h1 style="font-family:'Outfit',sans-serif; font-size:22px; font-weight:800; margin:0 0 4px;">🏓 Rekap Pertandingan Pickleball</h1>
+  <p id="pdfDate" style="font-size:12px; color:#6b7280; margin:0 0 20px;"></p>
+
+  <table style="width:100%; border-collapse:collapse; margin-bottom:16px;">
+    <tr>
+      <td style="width:50%; padding:16px; border:2px solid #FF6B4A; border-radius:8px; text-align:center;">
+        <p style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#FF6B4A; font-weight:700; margin:0 0 4px;">Tim 1</p>
+        <p id="pdfTeam1" style="font-weight:600; margin:0 0 10px; font-size:13px;"></p>
+        <p id="pdfScore1" style="font-family:'Outfit',sans-serif; font-size:48px; font-weight:900; margin:0;"></p>
+      </td>
+      <td style="width:6%;"></td>
+      <td style="width:50%; padding:16px; border:2px solid #3AA6FF; border-radius:8px; text-align:center;">
+        <p style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#3AA6FF; font-weight:700; margin:0 0 4px;">Tim 2</p>
+        <p id="pdfTeam2" style="font-weight:600; margin:0 0 10px; font-size:13px;"></p>
+        <p id="pdfScore2" style="font-family:'Outfit',sans-serif; font-size:48px; font-weight:900; margin:0;"></p>
+      </td>
+    </tr>
+  </table>
+
+  <p id="pdfWinner" style="text-align:center; font-weight:700; font-size:15px; background:#D7F238; padding:10px; border-radius:8px; margin:0 0 8px;"></p>
+  <p style="text-align:center; font-size:11px; color:#9ca3af; margin:0;">Dibuat otomatis oleh Skor Pickleball App</p>
+</div>
+
+
+<script>
+/* =====================================================================
+   STATE PERTANDINGAN
+   ===================================================================== */
+let state = {
+  score1: 0,
+  score2: 0,
+  serverTeam: 1,        // tim yang sedang servis: 1 atau 2
+  serverPlayerIndex: 0, // index pemain dalam tim yang servis (0/1)
+  serverNumber: 1,      // server ke-1 atau ke-2 dalam tim tsb
+  firstServeOfGame: true, // aturan khusus: servis pertama game hanya 1 kesempatan
+  gameOver: false,
+  winner: null
+};
+
+const el = id => document.getElementById(id);
+
+/* =====================================================================
+   HELPER
+   ===================================================================== */
+function getPlayers(team){
+  if(team === 1){
+    return [ el('p1a').value.trim() || 'Player A', el('p1b').value.trim() || 'Player B' ];
+  }
+  return [ el('p2a').value.trim() || 'Player C', el('p2b').value.trim() || 'Player D' ];
+}
+
+function teamLabel(team){
+  const p = getPlayers(team);
+  return `${p[0]} & ${p[1]}`;
+}
+
+function targetScore(){
+  return parseInt(el('targetScore').value, 10);
+}
+
+/* =====================================================================
+   LOGIKA POIN & ROTASI SERVIS (ganda pickleball, sistem reli)
+   ===================================================================== */
+function pointChange(team, delta){
+  if(state.gameOver && delta > 0) return;
+
+  if(delta < 0){
+    // Kurangi skor saja (tanpa membatalkan rotasi servis - untuk koreksi cepat)
+    if(team === 1) state.score1 = Math.max(0, state.score1 - 1);
+    else state.score2 = Math.max(0, state.score2 - 1);
+    state.gameOver = false;
+    state.winner = null;
+    render();
+    return;
+  }
+
+  // delta > 0 -> tim ini memenangkan reli
+  if(team === 1) state.score1++; else state.score2++;
+
+  const isServingTeamScoring = (team === state.serverTeam);
+
+  if(isServingTeamScoring){
+    // Server yang sama melanjutkan servis (pindah sisi kanan/kiri secara nyata,
+    // tapi identitas server tidak berubah)
+  } else {
+    // Tim penerima memenangkan reli -> proses aturan side-out
+    if(state.serverNumber === 1){
+      if(state.firstServeOfGame){
+        // Servis pertama game: hanya 1 kesempatan servis lalu langsung pindah tim
+        state.serverTeam = team;
+        state.serverPlayerIndex = 0;
+        state.serverNumber = 1;
+        state.firstServeOfGame = false;
+      } else {
+        // Pindah ke server ke-2 (partner), tim servis tetap sama
+        state.serverNumber = 2;
+        state.serverPlayerIndex = 1 - state.serverPlayerIndex;
+      }
+    } else {
+      // Server ke-2 gagal -> side-out, servis pindah ke tim lawan
+      state.serverTeam = team;
+      state.serverPlayerIndex = 0;
+      state.serverNumber = 1;
+    }
+  }
+
+  checkWinner();
+  render();
+}
+
+function checkWinner(){
+  const target = targetScore();
+  const diff = Math.abs(state.score1 - state.score2);
+  if(state.score1 >= target && diff >= 2){
+    state.gameOver = true; state.winner = 1;
+  } else if(state.score2 >= target && diff >= 2){
+    state.gameOver = true; state.winner = 2;
+  }
+}
+
+/* =====================================================================
+   RENDER TAMPILAN
+   ===================================================================== */
+function render(){
+  el('teamName1').textContent = teamLabel(1);
+  el('teamName2').textContent = teamLabel(2);
+  el('score1').textContent = state.score1;
+  el('score2').textContent = state.score2;
+  el('targetLabel').textContent = targetScore();
+
+  // Badge servis
+  const players = getPlayers(state.serverTeam);
+  const serverName = players[state.serverPlayerIndex];
+  const serveDesc = state.firstServeOfGame
+    ? 'Servis Pertama Game'
+    : `Server ${state.serverNumber}`;
+
+  el('serveBadge1').classList.toggle('flex', state.serverTeam === 1);
+  el('serveBadge1').classList.toggle('hidden', state.serverTeam !== 1);
+  el('serveBadge2').classList.toggle('flex', state.serverTeam === 2);
+  el('serveBadge2').classList.toggle('hidden', state.serverTeam !== 2);
+  el('serveText1').textContent = `${serverName} • ${serveDesc}`;
+  el('serveText2').textContent = `${serverName} • ${serveDesc}`;
+
+  // Highlight kartu tim yang servis
+  el('card1').classList.toggle('serving-glow', state.serverTeam === 1);
+  el('card2').classList.toggle('serving-glow', state.serverTeam === 2);
+
+  // Bola indikator berpindah sisi
+  const ballDot = el('ballDot');
+  ballDot.style.left = state.serverTeam === 1 ? '25%' : '75%';
+  ballDot.style.backgroundColor = state.serverTeam === 1 ? '#FF6B4A' : '#3AA6FF';
+
+  // Overlay pemenang
+  if(state.gameOver){
+    el('winnerOverlay').classList.remove('hidden');
+    const winName = state.winner === 1 ? teamLabel(1) : teamLabel(2);
+    const winScore = state.winner === 1 ? state.score1 : state.score2;
+    const loseScore = state.winner === 1 ? state.score2 : state.score1;
+    el('winnerText').textContent = `${winName} menang dengan skor ${winScore} - ${loseScore}`;
+  } else {
+    el('winnerOverlay').classList.add('hidden');
+  }
+}
+
+/* =====================================================================
+   SETUP PANEL TOGGLE
+   ===================================================================== */
+function toggleSetup(){
+  const body = el('setupBody');
+  const btn = el('setupToggleBtn');
+  const hidden = body.classList.toggle('hidden');
+  btn.textContent = hidden ? 'Tampilkan' : 'Sembunyikan';
+}
+
+/* =====================================================================
+   RESET
+   ===================================================================== */
+function resetMatch(){
+  if(!confirm('Reset skor pertandingan? Nama pemain tidak akan dihapus.')) return;
+  const firstTeam = parseInt(el('firstServeTeam').value, 10);
+  state = {
+    score1: 0, score2: 0,
+    serverTeam: firstTeam,
+    serverPlayerIndex: 0,
+    serverNumber: 1,
+    firstServeOfGame: true,
+    gameOver: false,
+    winner: null
+  };
+  render();
+}
+
+function closeOverlayAndReset(){
+  el('winnerOverlay').classList.add('hidden');
+  resetMatch();
+}
+
+/* =====================================================================
+   DOWNLOAD PDF (html2pdf.js)
+   ===================================================================== */
+function downloadPDF(){
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('id-ID', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
+    + ' • ' + now.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
+
+  el('pdfDate').textContent = dateStr;
+  el('pdfTeam1').textContent = teamLabel(1);
+  el('pdfTeam2').textContent = teamLabel(2);
+  el('pdfScore1').textContent = state.score1;
+  el('pdfScore2').textContent = state.score2;
+
+  let winnerLine = 'Pertandingan masih berlangsung saat rekap dibuat.';
+  if(state.gameOver){
+    const winName = state.winner === 1 ? teamLabel(1) : teamLabel(2);
+    winnerLine = `🏆 Pemenang: ${winName}`;
+  }
+  el('pdfWinner').textContent = winnerLine;
+
+  const opt = {
+    margin: 0,
+    filename: `rekap-pickleball-${now.toISOString().slice(0,10)}.pdf`,
+    image: { type:'jpeg', quality:0.98 },
+    html2canvas: { scale:2, backgroundColor:'#ffffff' },
+    jsPDF: { unit:'pt', format:'a5', orientation:'portrait' }
+  };
+
+  html2pdf().set(opt).from(el('pdfTemplate')).save();
+}
+
+/* =====================================================================
+   FIREBASE — simpan & baca riwayat pertandingan
+   =====================================================================
+   PENTING: Ganti konfigurasi di bawah ini dengan konfigurasi proyek
+   Firebase Anda sendiri (Firebase Console > Project Settings > Your apps).
+   Pastikan juga Firestore sudah diaktifkan (mode production/test) dan
+   security rules mengizinkan akses yang sesuai kebutuhan Anda.
+   ===================================================================== */
+const firebaseConfig = {
+    apiKey: "AIzaSyCqLRK7iIozFfF-xys8myrMT2O_7nndtSk",
+    authDomain: "scoreboard-c22213.firebaseapp.com",
+    projectId: "scoreboard-c22213",
+    storageBucket: "scoreboard-c22213.firebasestorage.app",
+    messagingSenderId: "1043919406510",
+    appId: "1:1043919406510:web:f1227a16f697b084e6743f",
+    measurementId: "G-V6VXDBZ9Z7"
+  };
+
+let db = null;
+let firebaseReady = false;
+
+try {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+  firebaseReady = true;
+} catch(err){
+  console.warn('Firebase belum dikonfigurasi dengan benar:', err);
+}
+
+async function saveMatchToCloud(){
+  if(!db){
+    alert('Firebase belum dikonfigurasi. Silakan isi objek firebaseConfig di dalam kode index.html dengan kredensial proyek Firebase Anda.');
+    return;
+  }
+  try{
+    await db.collection('pickleball_matches').add({
+      team1: teamLabel(1),
+      team2: teamLabel(2),
+      score1: state.score1,
+      score2: state.score2,
+      winner: state.gameOver ? (state.winner === 1 ? teamLabel(1) : teamLabel(2)) : null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert('Pertandingan berhasil disimpan ke cloud ✅');
+  } catch(err){
+    console.error(err);
+    alert('Gagal menyimpan ke Firebase. Cek konsol untuk detail error.');
+  }
+}
+
+let historyLoaded = false;
+function toggleHistory(){
+  const panel = el('historyPanel');
+  panel.classList.toggle('hidden');
+  if(!panel.classList.contains('hidden') && !historyLoaded){
+    loadHistory();
+    historyLoaded = true;
+  }
+}
+
+function loadHistory(){
+  if(!db){
+    el('historyStatus').textContent = 'Firebase belum dikonfigurasi. Isi firebaseConfig pada kode untuk mengaktifkan riwayat cloud.';
+    return;
+  }
+  el('historyStatus').textContent = 'Memuat riwayat...';
+  db.collection('pickleball_matches')
+    .orderBy('createdAt', 'desc')
+    .limit(10)
+    .onSnapshot(snapshot => {
+      const list = el('historyList');
+      list.innerHTML = '';
+      if(snapshot.empty){
+        el('historyStatus').textContent = 'Belum ada riwayat pertandingan tersimpan.';
+        return;
+      }
+      el('historyStatus').textContent = `${snapshot.size} pertandingan terakhir:`;
+      snapshot.forEach(doc => {
+        const d = doc.data();
+        const date = d.createdAt && d.createdAt.toDate ? d.createdAt.toDate().toLocaleString('id-ID') : '-';
+        const row = document.createElement('div');
+        row.className = 'bg-white/5 border border-white/10 rounded-lg px-3 py-2 flex items-center justify-between';
+        row.innerHTML = `
+          <div>
+            <p class="font-medium">${d.team1} <span class="text-court-line/40">vs</span> ${d.team2}</p>
+            <p class="text-court-line/40 text-xs">${date}${d.winner ? ' • 🏆 ' + d.winner : ''}</p>
+          </div>
+          <div class="font-display font-bold text-lg tabular">${d.score1} - ${d.score2}</div>
+        `;
+        list.appendChild(row);
+      });
+    }, err => {
+      console.error(err);
+      el('historyStatus').textContent = 'Gagal memuat riwayat dari Firebase.';
+    });
+}
+
+/* =====================================================================
+   INIT
+   ===================================================================== */
+render();
+</script>
+</body>
+</html>
